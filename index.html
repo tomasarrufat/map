@@ -175,6 +175,16 @@
       flex: 1;
     }
 
+    .comarca-polygon {
+      transition: transform 220ms ease, filter 220ms ease;
+      transform-origin: center center;
+    }
+
+    .comarca-polygon.lifted {
+      filter: drop-shadow(0 8px 12px rgba(0,0,0,0.35));
+      transform: translate3d(0, -8px, 0) scale(1.04);
+    }
+
     body.is-mobile #info-panel {
       top: 8px;
       right: 8px;
@@ -279,7 +289,7 @@
     <div class="hint">Fuente: tabla proporcionada (población 2024, censo porcino 2020).</div>
   </div>
 
-  <div class="legend">
+  <div id="legend" class="legend">
     <div class="legend-title">Cerdos por km²</div>
     <div class="legend-scale"></div>
     <div class="legend-labels">

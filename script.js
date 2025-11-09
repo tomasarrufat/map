@@ -84,6 +84,8 @@ const metricConfigs = {
 let activeMetricKey = "pigsPerKm2";
 let scaleMode = "log";
 let fillOpacity = 0.8;
+let pinnedLayer = null;
+let hoveredLayer = null;
 
 const isMobileDevice = (() => {
   if (typeof navigator === "undefined") return false;
@@ -100,6 +102,84 @@ if (typeof document !== "undefined") {
       if (isMobileDevice) document.body.classList.add("is-mobile");
     });
   }
+}
+
+function liftLayer(layer) {
+  const el = layer?.getElement?.();
+  if (!el) return;
+  L.DomUtil.addClass(el, "lifted");
+}
+
+function dropLayer(layer) {
+  const el = layer?.getElement?.();
+  if (!el) return;
+  L.DomUtil.removeClass(el, "lifted");
+}
+
+function applyLayerBaseStyle(layer, data) {
+  const value = data ? getMetricValue(data) : null;
+  layer.setStyle({
+    color: "#555",
+    weight: 0.7,
+    fillOpacity,
+    fillColor: getColor(value)
+  });
+}
+
+function applyLayerHighlightStyle(layer, data) {
+  const value = data ? getMetricValue(data) : null;
+  layer.setStyle({
+    color: "#000",
+    weight: 2,
+    fillOpacity,
+    fillColor: getColor(value)
+  });
+}
+
+function focusLayer(layer) {
+  if (!layer || layer === pinnedLayer) return;
+  if (hoveredLayer && hoveredLayer !== pinnedLayer && hoveredLayer !== layer) {
+    dropLayer(hoveredLayer);
+    const meta = hoveredLayer._comarcaMeta;
+    applyLayerBaseStyle(hoveredLayer, meta ? meta.data : null);
+  }
+  hoveredLayer = layer;
+  const meta = layer._comarcaMeta;
+  applyLayerHighlightStyle(layer, meta ? meta.data : null);
+  liftLayer(layer);
+}
+
+function blurLayer(layer) {
+  if (!layer || layer === pinnedLayer) return;
+  if (hoveredLayer === layer) hoveredLayer = null;
+  const meta = layer._comarcaMeta;
+  applyLayerBaseStyle(layer, meta ? meta.data : null);
+  dropLayer(layer);
+}
+
+function pinLayer(layer) {
+  if (!layer) return;
+  if (pinnedLayer && pinnedLayer !== layer) {
+    dropLayer(pinnedLayer);
+    const previousMeta = pinnedLayer._comarcaMeta;
+    applyLayerBaseStyle(pinnedLayer, previousMeta ? previousMeta.data : null);
+  }
+  pinnedLayer = layer;
+  const meta = layer._comarcaMeta;
+  applyLayerHighlightStyle(layer, meta ? meta.data : null);
+  liftLayer(layer);
+  if (meta) {
+    updateInfoPanel(meta.name, meta.data || null);
+  }
+}
+
+function clearPinnedLayer() {
+  if (!pinnedLayer) return;
+  const meta = pinnedLayer._comarcaMeta;
+  dropLayer(pinnedLayer);
+  applyLayerBaseStyle(pinnedLayer, meta ? meta.data : null);
+  pinnedLayer = null;
+  updateInfoPanel(null, null);
 }
 
 const namePropertyCandidates = [
@@ -233,6 +313,14 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: "&copy; OpenStreetMap contributors"
 }).addTo(map);
 
+["info-panel", "layer-selector", "legend"].forEach(id => {
+  const node = document.getElementById(id);
+  if (node) {
+    L.DomEvent.disableClickPropagation(node);
+    L.DomEvent.disableScrollPropagation(node);
+  }
+});
+
 const geojsonUrl = "comarques_4326.geojson";
 
 let comarcaLayer = null;
@@ -245,7 +333,8 @@ function baseFeatureStyle(feature) {
     color: "#555",
     weight: 0.7,
     fillOpacity,
-    fillColor: getColor(value)
+    fillColor: getColor(value),
+    className: "comarca-polygon"
   };
 }
 
@@ -257,52 +346,62 @@ fetch(geojsonUrl)
   .then(geojson => {
     const layer = L.geoJSON(geojson, {
       style: baseFeatureStyle,
-      onEachFeature: (feature, layer) => {
-        const rawName =
-          feature.properties.NOMCOMAR || feature.properties.Comarca ||
-          feature.properties.COMARCA || feature.properties.comarca ||
-          feature.properties.nom_comar || feature.properties.NAME_2 ||
-          feature.properties.NAME || feature.properties.NOM || "Desconocida";
+          onEachFeature: (feature, layer) => {
+            const rawName =
+              feature.properties.NOMCOMAR || feature.properties.Comarca ||
+              feature.properties.COMARCA || feature.properties.comarca ||
+              feature.properties.nom_comar || feature.properties.NAME_2 ||
+              feature.properties.NAME || feature.properties.NOM || "Desconocida";
 
-        const canonical = getComarcaNameFromProps(feature.properties);
-        const name = canonical || rawName;
-        const data = canonical ? comarcaData[canonical] : null;
+            const canonical = getComarcaNameFromProps(feature.properties);
+            const name = canonical || rawName;
+            const data = canonical ? comarcaData[canonical] : null;
+            layer._comarcaMeta = { name, data };
 
-        if (!canonical) {
-          console.warn("Sin datos para comarca del GeoJSON:", rawName);
-        }
+            if (!canonical) {
+              console.warn("Sin datos para comarca del GeoJSON:", rawName);
+            }
 
-        layer.on("mouseover", () => {
-          layer.setStyle({ weight: 2, color: "#000" });
-          if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) {
-            layer.bringToFront();
+            layer.on("mouseover", () => {
+              focusLayer(layer);
+              if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) {
+                layer.bringToFront();
+              }
+              updateInfoPanel(name, data || null);
+            });
+
+            layer.on("mouseout", () => {
+              blurLayer(layer);
+              if (pinnedLayer && pinnedLayer._comarcaMeta) {
+                const meta = pinnedLayer._comarcaMeta;
+                updateInfoPanel(meta.name, meta.data || null);
+              } else if (!hoveredLayer) {
+                updateInfoPanel(null, null);
+              }
+            });
+
+            layer.on("click", event => {
+              L.DomEvent.stopPropagation(event);
+              pinLayer(layer);
+            });
           }
-          updateInfoPanel(name, data || null);
-        });
+        }).addTo(map);
 
-        layer.on("mouseout", () => {
-          const value = data ? getMetricValue(data) : null;
-          layer.setStyle({
-            color: "#555",
-            weight: 0.7,
-            fillOpacity,
-            fillColor: getColor(value)
-          });
-        });
-      }
-    }).addTo(map);
+        comarcaLayer = layer;
 
-    comarcaLayer = layer;
+        map.fitBounds(layer.getBounds(), { padding: [20, 20] });
+      })
+      .catch(err => {
+        console.error("Error al cargar el GeoJSON de comarcas:", err);
+        alert("No se ha podido cargar el mapa de comarcas. Revisa la URL.");
+      });
 
-    map.fitBounds(layer.getBounds(), { padding: [20, 20] });
-  })
-  .catch(err => {
-    console.error("Error al cargar el GeoJSON de comarcas:", err);
-    alert("No se ha podido cargar el mapa de comarcas. Revisa la URL.");
-  });
+    map.on("click", () => {
+      clearPinnedLayer();
+    });
 
-const legendTitleEl = document.querySelector(".legend-title");
-const legendLabels = document.querySelectorAll(".legend-labels span");
+    const legendTitleEl = document.querySelector(".legend-title");
+    const legendLabels = document.querySelectorAll(".legend-labels span");
 
 function updateLegend() {
   const config = metricConfigs[activeMetricKey];
@@ -323,15 +422,15 @@ function updateLegend() {
 function refreshLayerStyles() {
   if (!comarcaLayer) return;
   comarcaLayer.eachLayer(layer => {
-    const canonical = getComarcaNameFromProps(layer.feature?.properties || {}) || "";
-    const data = comarcaData[canonical];
-    const value = data ? getMetricValue(data) : null;
-    layer.setStyle({
-      color: "#555",
-      weight: 0.7,
-      fillOpacity,
-      fillColor: getColor(value)
-    });
+    const meta = layer._comarcaMeta;
+    if (!meta) return;
+    if (layer === pinnedLayer || layer === hoveredLayer) {
+      applyLayerHighlightStyle(layer, meta.data || null);
+      liftLayer(layer);
+    } else {
+      applyLayerBaseStyle(layer, meta.data || null);
+      dropLayer(layer);
+    }
   });
 }
 
