@@ -207,25 +207,27 @@
       margin-bottom: 4px;
     }
 
-    body.is-mobile #info-panel table {
-      display: grid;
-      grid-template-columns: auto auto;
-      column-gap: 6px;
-      row-gap: 2px;
-      font-size: 9px;
+    body.is-mobile #info-panel table,
+    body.is-mobile #info-panel tbody,
+    body.is-mobile #info-panel tr {
+      display: block;
+      width: 100%;
+      font-size: 10px;
     }
 
-    body.is-mobile #info-panel table tr {
-      display: contents;
+    body.is-mobile #info-panel tr + tr {
+      margin-top: 4px;
     }
 
     body.is-mobile #info-panel td {
+      display: block;
       padding: 0;
     }
 
     body.is-mobile #info-panel td.value {
       text-align: left;
       font-weight: 600;
+      font-size: 11px;
     }
 
     body.is-mobile .layer-selector {
